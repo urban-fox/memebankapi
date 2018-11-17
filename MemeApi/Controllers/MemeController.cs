@@ -6,6 +6,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MemeApi.Models;
+using MemeBank.Helpers;
+using MemeBank.Models;
+using Microsoft.WindowsAzure.Storage.Blob;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Auth;
+using Microsoft.Extensions.Configuration;
 
 namespace MemeApi.Controllers
 {
@@ -14,10 +20,12 @@ namespace MemeApi.Controllers
     public class MemeController : ControllerBase
     {
         private readonly MemeApiContext _context;
+        private IConfiguration _configuration;
 
-        public MemeController(MemeApiContext context)
+        public MemeController(MemeApiContext context, IConfiguration configuration)
         {
             _context = context;
+            _configuration = configuration;
         }
 
         // GET: api/Meme
@@ -93,6 +101,108 @@ namespace MemeApi.Controllers
 
             return NoContent();
         }
+
+        [HttpPost, Route("upload")]
+        public async Task<IActionResult> UploadFile([FromForm]MemeImageItem meme)
+        {
+            if (!MultipartRequestHelper.IsMultipartContentType(Request.ContentType))
+            {
+                return BadRequest($"Expected a multipart request, but got {Request.ContentType}");
+            }
+            try
+            {
+                using (var stream = meme.Image.OpenReadStream())
+                {
+                    var cloudBlock = await UploadToBlob(meme.Image.FileName, null, stream);
+                    //// Retrieve the filename of the file you have uploaded
+                    //var filename = provider.FileData.FirstOrDefault()?.LocalFileName;
+                    if (string.IsNullOrEmpty(cloudBlock.StorageUri.ToString()))
+                    {
+                        return BadRequest("An error has occured while uploading your file. Please try again.");
+                    }
+
+                    MemeItem memeItem = new MemeItem();
+                    memeItem.Title = meme.Title;
+                    memeItem.Tags = meme.Tags;
+
+                    System.Drawing.Image image = System.Drawing.Image.FromStream(stream);
+                    memeItem.Height = image.Height.ToString();
+                    memeItem.Width = image.Width.ToString();
+                    memeItem.Url = cloudBlock.SnapshotQualifiedUri.AbsoluteUri;
+                    memeItem.Uploaded = DateTime.Now.ToString();
+
+                    _context.MemeItem.Add(memeItem);
+                    await _context.SaveChangesAsync();
+
+                    return Ok($"File: {meme.Title} has successfully uploaded");
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"An error has occured. Details: {ex.Message}");
+            }
+
+
+        }
+
+        private async Task<CloudBlockBlob> UploadToBlob(string filename, byte[] imageBuffer = null, System.IO.Stream stream = null)
+        {
+
+            var accountName = _configuration["AzureBlob:name"];
+            var accountKey = _configuration["AzureBlob:key"]; ;
+            var storageAccount = new CloudStorageAccount(new StorageCredentials(accountName, accountKey), true);
+            CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
+
+            CloudBlobContainer imagesContainer = blobClient.GetContainerReference("images");
+
+            string storageConnectionString = _configuration["AzureBlob:connectionString"];
+
+            // Check whether the connection string can be parsed.
+            if (CloudStorageAccount.TryParse(storageConnectionString, out storageAccount))
+            {
+                try
+                {
+                    // Generate a new filename for every new blob
+                    var fileName = Guid.NewGuid().ToString();
+                    fileName += GetFileExtention(filename);
+
+                    // Get a reference to the blob address, then upload the file to the blob.
+                    CloudBlockBlob cloudBlockBlob = imagesContainer.GetBlockBlobReference(fileName);
+
+                    if (stream != null)
+                    {
+                        await cloudBlockBlob.UploadFromStreamAsync(stream);
+                    }
+                    else
+                    {
+                        return new CloudBlockBlob(new Uri(""));
+                    }
+
+                    return cloudBlockBlob;
+                }
+                catch (StorageException ex)
+                {
+                    return new CloudBlockBlob(new Uri(""));
+                }
+            }
+            else
+            {
+                return new CloudBlockBlob(new Uri(""));
+            }
+
+        }
+
+        private string GetFileExtention(string fileName)
+        {
+            if (!fileName.Contains("."))
+                return ""; //no extension
+            else
+            {
+                var extentionList = fileName.Split('.');
+                return "." + extentionList.Last(); //assumes last item is the extension 
+            }
+        }
+
 
         // POST: api/Meme
         [HttpPost]
