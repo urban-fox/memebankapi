@@ -46,6 +46,19 @@ namespace MemeApi.Controllers
             return Ok(memeItem);
         }
 
+        // GET: api/Meme/Tags
+        [Route("tags")]
+        [HttpGet]
+        public async Task<List<string>> GetTags()
+        {
+            var memes = (from m in _context.MemeItem
+                         select m.Tags).Distinct();
+
+            var returned = await memes.ToListAsync();
+
+            return returned;
+        }
+
         // PUT: api/Meme/5
         [HttpPut("{id}")]
         public async Task<IActionResult> PutMemeItem([FromRoute] int id, [FromBody] MemeItem memeItem)
