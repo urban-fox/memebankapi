@@ -30,7 +30,7 @@ namespace MemeApi
             services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_2_1);
 
             services.AddDbContext<MemeApiContext>(options =>
-                    options.UseSqlServer(Configuration.GetConnectionString("MemeApiContext")));
+                    options.UseSqlite(Configuration.GetConnectionString("MemeApiContext")));
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
